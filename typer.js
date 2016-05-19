@@ -10,10 +10,14 @@ var Words = Backbone.Collection.extend({
 
 var WordView = Backbone.View.extend({
 	initialize: function() {
-		$(this.el).css({position:'absolute'});
 		var string = this.model.get('string');
 		var letter_width = 25;
 		var word_width = string.length * letter_width;
+		$(this.el).css({
+			position:'absolute',
+			overflow:'auto',
+			'width':word_width
+		});
 		if(this.model.get('x') + word_width > $(window).width()) {
 			this.model.set({x:$(window).width() - word_width});
 		}
@@ -53,6 +57,72 @@ var WordView = Backbone.View.extend({
 	}
 });
 
+var PlayView = Backbone.View.extend({
+	initialize: function() {
+		$(this.el)
+			.addClass('btn btn-default')
+			.attr('type', 'button')
+			.append($('<span>')
+				.addClass('glyphicon glyphicon-play')
+				.css({
+					'aria-hidden':'true',
+					'margin-right':'6px'
+				})
+			)
+			.append($('<span>')
+				.attr('id', 'play-button')
+				.text('Play'));
+		this.listenTo(this.model, 'resetPlayButton', this.reset);
+	},
+	events: {
+		"click": "clickEvent"
+	},
+	clickEvent: function() {
+		if (this.model.get('iterate_interval_id') == undefined) {
+			$(this.el).find('.glyphicon-play').switchClass('glyphicon-play', 'glyphicon-pause');
+			$(this.el).find('#play-button').text('Pause');
+			this.model.start();
+		} else {
+			if (!this.model.get('is_paused')) {
+				$(this.el).find('.glyphicon-pause').switchClass('glyphicon-pause', 'glyphicon-play');
+				$(this.el).find('#play-button').text('Resume');
+				this.model.pause();
+			} else {
+				$(this.el).find('.glyphicon-play').switchClass('glyphicon-play', 'glyphicon-pause');
+				$(this.el).find('#play-button').text('Pause');
+				this.model.resume();
+			}
+		}
+	},
+	reset: function() {
+		$(this.el).find('.glyphicon-pause').switchClass('glyphicon-pause', 'glyphicon-play');
+		$(this.el).find('#play-button').text('Play');
+	}
+});
+
+var StopView = Backbone.View.extend({
+	initialize: function() {
+		$(this.el)
+			.addClass('btn btn-default')
+			.attr('type', 'button')
+			.append($('<span>')
+				.addClass('glyphicon glyphicon-stop')
+				.css({
+					'aria-hidden':'true',
+					'margin-right':'6px'
+				})
+			)
+			.append('Stop');
+	},
+	events: {
+		"click": "clickEvent"
+	},
+	clickEvent: function() {
+		this.model.trigger('resetPlayButton');
+		this.model.stop();
+	}
+});
+
 var TyperView = Backbone.View.extend({
 	initialize: function() {
 		var wrapper = $('<div>')
@@ -68,15 +138,7 @@ var TyperView = Backbone.View.extend({
 		var self = this;
 		var text_input = $('<input>')
 			.addClass('form-control')
-			.css({
-				'border-radius':'4px',
-				position:'absolute',
-				bottom:'0',
-				'min-width':'80%',
-				width:'80%',
-				'margin-bottom':'10px',
-				'z-index':'1000'
-			}).keyup(function() {
+			.keyup(function() {
 				var words = self.model.get('words');
 				for(var i = 0;i < words.length;i++) {
 					var word = words.at(i);
@@ -88,11 +150,46 @@ var TyperView = Backbone.View.extend({
 							$(this).val('');
 						}
 					} else {
+						if (word.get('highlight')) {
+							self.model.get('scorer').decreasePoint();
+						}
 						word.set({highlight:0});
 					}
 				}
 			});
-		
+		var play_button = $('<button>');
+		var play_reset = undefined;
+		this.model.set({play_reset:play_reset});
+
+		new PlayView({
+			model: this.model,
+			el: play_button
+		});
+
+		var stop_button = $('<button>');
+		new StopView({
+			model: this.model,
+			el: stop_button,
+			play_reset: play_reset
+		});
+
+		var text_input_group = $('<div>')
+			.addClass('input-group')
+			.css({
+				'border-radius':'4px',
+				position:'absolute',
+				bottom:'0',
+				'min-width':'80%',
+				width:'80%',
+				'margin-bottom':'10px',
+				'z-index':'1000'
+			})
+			.append($('<div>')
+				.addClass('input-group-btn')
+				.append(play_button)
+				.append(stop_button)
+			)
+			.append(text_input);
 		$(this.el)
 			.append(wrapper
 				.append($('<form>')
@@ -102,9 +199,9 @@ var TyperView = Backbone.View.extend({
 					.submit(function() {
 						return false;
 					})
-					.append(text_input)));
+					.append(text_input_group)));
 		
-		text_input.css({left:((wrapper.width() - text_input.width()) / 2) + 'px'});
+		text_input_group.css({left:((wrapper.width() - text_input.width()) / 2) + 'px'});
 		text_input.focus();
 		
 		this.listenTo(this.model, 'change', this.render);
@@ -132,6 +229,42 @@ var TyperView = Backbone.View.extend({
 	}
 });
 
+var ScorerView = Backbone.View.extend({
+	initialize: function() {
+		$(this.el)
+			.append($('<div>')
+				.attr('id', 'score')
+				.addClass('bg-primary img-rounded')
+				.css({
+					width:'100px',
+					margin:'10px',
+					padding:'5px'
+				})
+			);
+		this.listenTo(this.model, 'change', this.render);
+		this.render();
+	},
+	render: function() {
+		$(this.el).find('#score').text('Score: ' + this.model.get('score'));
+	}
+});
+
+var Scorer = Backbone.Model.extend({
+	defaults:{
+		score:0
+	},
+	increasePoint: function() {
+		var increase_constant = 10;
+		this.set({score:this.get('score') + increase_constant});
+		this.trigger('change');
+	},
+	decreasePoint: function() {
+		var decrease_constant = 3;
+		this.set({score:this.get('score') - decrease_constant});
+		this.trigger('change');
+	}
+});
+
 var Typer = Backbone.Model.extend({
 	defaults:{
 		max_num_words:10,
@@ -139,6 +272,9 @@ var Typer = Backbone.Model.extend({
 		words:new Words(),
 		min_speed:1,
 		max_speed:5,
+		iterate_interval_id:undefined,
+		is_paused:false,
+		scorer:new Scorer()
 	},
 	
 	initialize: function() {
@@ -146,17 +282,48 @@ var Typer = Backbone.Model.extend({
 			model: this,
 			el: $(document.body)
 		});
+		new ScorerView({
+			model: this.get('scorer'),
+			el: $(document.body)
+		})
 	},
 
 	start: function() {
-		var animation_delay = 100;
+		if (this.get('iterate_interval_id') != undefined) {
+			return;
+		}
+		var animation_delay = 25;
 		var self = this;
-		setInterval(function() {
+		this.set({is_paused:false});
+		this.set('iterate_interval_id', setInterval(function() {
 			self.iterate();
-		},animation_delay);
+		},animation_delay));
+	},
+
+	stop: function() {
+		if (this.get('iterate_interval_id') == undefined) {
+			return;
+		}
+		var words = this.get('words');
+		for(var i = 0;i < words.length;) {
+			words.remove(words.at(i));
+		}
+		this.trigger('change');
+		clearInterval(this.get('iterate_interval_id'));
+		this.set({iterate_interval_id:undefined});
+	},
+
+	pause: function() {
+		this.set({is_paused:true});
+	},
+	resume: function() {
+		this.set({is_paused:false});
 	},
 	
 	iterate: function() {
+		if (this.get('is_paused')) {
+			return;
+		}
 		var words = this.get('words');
 		if(words.length < this.get('max_num_words')) {
 			var top_most_word = undefined;
@@ -179,11 +346,12 @@ var Typer = Backbone.Model.extend({
 					}
 				}
 				
+				var speed_modifier = 4;
 				var word = new Word({
 					x:this.random_number_from_interval(0,$(window).width()),
 					y:0,
 					string:filtered_string,
-					speed:this.random_number_from_interval(this.get('min_speed'),this.get('max_speed'))
+					speed:this.random_number_from_interval(this.get('min_speed'),this.get('max_speed')) / speed_modifier
 				});
 				words.add(word);
 			}
@@ -198,7 +366,8 @@ var Typer = Backbone.Model.extend({
 				words_to_be_removed.push(word);
 			}
 			
-			if(word.get('highlight') && word.get('string').length == word.get('highlight')) {
+			if(word.get('highlight') && word.get('string').length == word.get('highlight') && !word.get('move_next_iteration')) {
+				this.get('scorer').increasePoint();
 				word.set({move_next_iteration:true});
 			}
 		}
